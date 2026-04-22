@@ -1,0 +1,43 @@
+{
+  "name": "gpt-image-2-mcp",
+  "version": "0.1.0",
+  "description": "MCP server exposing OpenAI's gpt-image-2 for image generation and iterative editing.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "gpt-image-2-mcp": "./build/index.js"
+  },
+  "files": [
+    "build",
+    "README.md",
+    "RESEARCH.md"
+  ],
+  "scripts": {
+    "build": "tsc && chmod 755 build/index.js",
+    "dev": "tsx watch src/index.ts",
+    "start": "node build/index.js",
+    "inspect": "npx -y @modelcontextprotocol/inspector node build/index.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "openai",
+    "gpt-image",
+    "gpt-image-2",
+    "image-generation"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "openai": "^6.0.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
