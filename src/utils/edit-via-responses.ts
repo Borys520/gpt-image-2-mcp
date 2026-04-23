@@ -1,8 +1,63 @@
 import type OpenAI from "openai";
 import type { Uploadable } from "openai";
 import type { ImagesResponse } from "openai/resources/images";
+import type {
+  ResponseInputItem,
+  Tool,
+} from "openai/resources/responses/responses";
 import { MODEL_ID } from "../constants.js";
 import { log } from "./logger.js";
+
+/** Narrowed view of the `image_generation` tool we pass to the Responses API. */
+type ImageGenTool = Extract<Tool, { type: "image_generation" }>;
+
+/**
+ * Set OPENAI_USE_DIRECT_EDITS=1 to use `/v1/images/edits` directly instead
+ * of the Responses-API workaround. Useful for testing once OpenAI ships
+ * the fix that makes the direct endpoint accept gpt-image-2 (see the
+ * OpenAI community thread "EDIT Endpoint - /images/edits refusing
+ * gpt-image models"). When false (default), we go through Responses.
+ */
+export function usingDirectEdits(): boolean {
+  return process.env.OPENAI_USE_DIRECT_EDITS === "1";
+}
+
+/**
+ * Direct `/v1/images/edits` call. This currently fails for gpt-image-2
+ * with `400 Invalid value: 'gpt-image-2'. Value must be 'dall-e-2'.`, but
+ * we ship the path anyway so users can flip the env var to test when
+ * OpenAI fixes it — no release required.
+ */
+export async function editViaDirectEndpoint(
+  client: OpenAI,
+  params: EditViaResponsesParams & { n?: number },
+): Promise<ImagesResponse> {
+  const req: Parameters<typeof client.images.edit>[0] = {
+    model: MODEL_ID,
+    image: params.images.length === 1 ? params.images[0]! : params.images,
+    prompt: params.prompt,
+    ...(params.mask ? { mask: params.mask } : {}),
+    ...(params.size && params.size !== "auto"
+      ? { size: params.size as "1024x1024" }
+      : {}),
+    ...(params.quality && params.quality !== "auto"
+      ? { quality: params.quality as "low" }
+      : {}),
+    ...(params.n && params.n > 1 ? { n: params.n } : {}),
+    ...(params.background && params.background !== "auto"
+      ? { background: params.background }
+      : {}),
+    ...(params.output_format ? { output_format: params.output_format } : {}),
+    ...(params.output_compression != null
+      ? { output_compression: params.output_compression }
+      : {}),
+    ...(params.user ? { user: params.user } : {}),
+  };
+  log.info("editViaDirectEndpoint: calling /v1/images/edits (OPENAI_USE_DIRECT_EDITS=1)");
+  // `client.images.edit`'s return type is a union with a streaming variant;
+  // we never set `stream: true`, so narrow to the non-streaming response.
+  return (await client.images.edit(req)) as ImagesResponse;
+}
 
 /**
  * Route image edits through the Responses API's `image_generation` tool
@@ -54,17 +109,22 @@ export async function editViaResponses(
       maskFileId = mf.id;
     }
 
-    const userContent: Array<
-      | { type: "input_text"; text: string }
-      | { type: "input_image"; file_id: string; detail: "auto" | "low" | "high" }
-    > = [{ type: "input_text", text: params.prompt }];
-    for (const fid of uploadedFileIds) {
-      userContent.push({ type: "input_image", file_id: fid, detail: "auto" });
-    }
+    const messageItem: ResponseInputItem.Message = {
+      role: "user",
+      content: [
+        { type: "input_text", text: params.prompt },
+        ...uploadedFileIds.map(
+          (fid) =>
+            ({ type: "input_image", file_id: fid, detail: "auto" }) as const,
+        ),
+      ],
+    };
 
-    const imageTool: Record<string, unknown> = {
+    // gpt-image-2 is not in the SDK's ImageModel union yet; cast only the
+    // model string to the SDK's accepted shape. Every other field is typed.
+    const imageTool: ImageGenTool = {
       type: "image_generation",
-      model: MODEL_ID,
+      model: MODEL_ID as ImageGenTool["model"],
       action: "edit",
     };
     if (params.size && params.size !== "auto") imageTool.size = params.size;
@@ -77,8 +137,8 @@ export async function editViaResponses(
 
     const resp = await client.responses.create({
       model: HOST_MODEL,
-      input: [{ role: "user", content: userContent }] as never,
-      tools: [imageTool as never],
+      input: [messageItem],
+      tools: [imageTool],
       tool_choice: { type: "image_generation" },
       ...(params.user ? { user: params.user } : {}),
     });

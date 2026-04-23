@@ -10,14 +10,18 @@
   "files": [
     "build",
     "README.md",
-    "RESEARCH.md"
+    "RESEARCH.md",
+    "CHANGELOG.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsc && chmod 755 build/index.js",
     "dev": "tsx watch src/index.ts",
     "start": "node build/index.js",
     "inspect": "npx -y @modelcontextprotocol/inspector node build/index.js",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test 'tests/*.test.ts'",
+    "prepublishOnly": "pnpm run typecheck && pnpm run test && pnpm run build"
   },
   "keywords": [
     "mcp",

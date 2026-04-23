@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { log } from "./logger.js";
+import { assertSafeOutputDir } from "./path-guard.js";
 
 /**
  * Resolve the default output directory for generated images, mirroring the
@@ -36,12 +37,14 @@ export function getDefaultOutputDir(): string {
 }
 
 export function resolveOutputDir(explicit?: string | null): string {
-  if (explicit && explicit.trim().length > 0) {
-    return path.isAbsolute(explicit)
-      ? explicit
-      : path.resolve(process.cwd(), explicit);
-  }
-  return getDefaultOutputDir();
+  const resolved =
+    explicit && explicit.trim().length > 0
+      ? path.isAbsolute(explicit)
+        ? explicit
+        : path.resolve(process.cwd(), explicit)
+      : getDefaultOutputDir();
+  assertSafeOutputDir(resolved);
+  return resolved;
 }
 
 export function ensureDir(dir: string): void {

@@ -10,6 +10,7 @@ import { validateSize } from "../utils/size-validator.js";
 import {
   backgroundField,
   filenamePrefixField,
+  imageResultOutput,
   moderationField,
   nField,
   outputCompressionField,
@@ -20,6 +21,7 @@ import {
   sizeField,
   userField,
 } from "./schemas.js";
+import { toolError } from "./tool-error.js";
 
 const inputSchema = {
   prompt: promptField,
@@ -48,6 +50,7 @@ export function registerGenerateImage(server: McpServer): void {
         'Sizes accept presets or any custom "WxH" where edges are multiples of 16, max edge 3840px, ' +
         "aspect ratio within 1:3–3:1, total pixels 655K–8.29M.",
       inputSchema,
+      outputSchema: imageResultOutput,
       annotations: {
         title: "Generate Image",
         readOnlyHint: false,
@@ -110,11 +113,4 @@ export function registerGenerateImage(server: McpServer): void {
       }
     },
   );
-}
-
-function toolError(text: string): CallToolResult {
-  return {
-    content: [{ type: "text", text }],
-    isError: true,
-  };
 }

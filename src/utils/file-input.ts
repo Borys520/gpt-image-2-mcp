@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { toFile, type Uploadable } from "openai";
 import {
   MAX_EDIT_IMAGES,
@@ -145,8 +146,9 @@ function parseDataUrl(url: string): ParsedDataUrl {
 
 function fileURLToFsPath(url: string): string {
   try {
-    return new URL(url).pathname;
+    return fileURLToPath(url);
   } catch {
+    // Fallback for malformed URLs; prefer Node's parser when it works.
     return url.replace(/^file:\/\//, "");
   }
 }

@@ -4,7 +4,11 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { type OutputFormat } from "../constants.js";
 import { describeOpenAIError, getClient } from "../openai-client.js";
-import { editViaResponses } from "../utils/edit-via-responses.js";
+import {
+  editViaDirectEndpoint,
+  editViaResponses,
+  usingDirectEdits,
+} from "../utils/edit-via-responses.js";
 import { log } from "../utils/logger.js";
 import { resolveOutputDir } from "../utils/output-dir.js";
 import { buildImageResult } from "../utils/result-builder.js";
@@ -23,15 +27,19 @@ import { validateSize } from "../utils/size-validator.js";
 import {
   backgroundField,
   editQualityField,
+  endSessionOutput,
   filenamePrefixField,
+  listSessionsOutput,
   maskField,
   outputCompressionField,
   outputDirField,
   outputFormatField,
   promptField,
+  sessionImageResultOutput,
   sizeField,
   userField,
 } from "./schemas.js";
+import { toolError } from "./tool-error.js";
 
 /**
  * Iterative-edit session tools. The Gemini MCP exposes the same shape:
@@ -77,6 +85,7 @@ function registerStart(server: McpServer): void {
         "continue_edit_session to iteratively refine the image (each turn uses the previous " +
         "turn's output as the input). Use end_edit_session when done.",
       inputSchema,
+      outputSchema: sessionImageResultOutput,
       annotations: {
         title: "Start Edit Session",
         readOnlyHint: false,
@@ -97,14 +106,16 @@ function registerStart(server: McpServer): void {
         const uploadables = await Promise.all(args.images.map((s) => loadImage(s)));
         const mask = args.mask ? await loadMask(args.mask) : undefined;
 
+        const useDirect = usingDirectEdits();
+
         log.info("start_edit_session", {
           promptPreview: args.prompt.slice(0, 80),
           inputCount: args.images.length,
-          route: "responses",
+          route: useDirect ? "direct" : "responses",
         });
 
         const client = getClient();
-        const res = await editViaResponses(client, {
+        const editParams = {
           prompt: args.prompt,
           images: uploadables,
           mask,
@@ -114,7 +125,10 @@ function registerStart(server: McpServer): void {
           output_format: args.output_format,
           output_compression: args.output_compression,
           user: args.user,
-        });
+        };
+        const res = useDirect
+          ? await editViaDirectEndpoint(client, editParams)
+          : await editViaResponses(client, editParams);
 
         const built = buildImageResult({
           response: res,
@@ -172,6 +186,7 @@ function registerContinue(server: McpServer): void {
         "\"add a small boat on the horizon\"; include \"keep everything else the same\" to " +
         "limit drift. Returns the new image and the updated session.",
       inputSchema,
+      outputSchema: sessionImageResultOutput,
       annotations: {
         title: "Continue Edit Session",
         readOnlyHint: false,
@@ -204,8 +219,9 @@ function registerContinue(server: McpServer): void {
         const prevFile = await toFile(buf, `session-${session.id}-prev.${ext}`, { type: session.lastImageMime });
         const background = args.background ?? "auto";
 
+        const useDirect = usingDirectEdits();
         const client = getClient();
-        const res = await editViaResponses(client, {
+        const editParams = {
           prompt: args.prompt,
           images: [prevFile],
           size: sizeCheck.canonical as EditSize,
@@ -214,7 +230,10 @@ function registerContinue(server: McpServer): void {
           output_format: args.output_format,
           output_compression: args.output_compression,
           user: args.user,
-        });
+        };
+        const res = useDirect
+          ? await editViaDirectEndpoint(client, editParams)
+          : await editViaResponses(client, editParams);
 
         const built = buildImageResult({
           response: res,
@@ -261,6 +280,7 @@ function registerEnd(server: McpServer): void {
         "discarded on server restart — but calling this frees memory sooner and keeps " +
         "list_edit_sessions tidy.",
       inputSchema,
+      outputSchema: endSessionOutput,
       annotations: {
         title: "End Edit Session",
         readOnlyHint: false,
@@ -296,6 +316,7 @@ function registerList(server: McpServer): void {
         "List active iterative-edit sessions (in-memory only, discarded on server restart). " +
         "Useful to recover a session_id after a client reconnect.",
       inputSchema,
+      outputSchema: listSessionsOutput,
       annotations: {
         title: "List Edit Sessions",
         readOnlyHint: true,
@@ -348,12 +369,5 @@ function addSessionIdToResult(
       session_id: sessionId,
       turn,
     },
-  };
-}
-
-function toolError(text: string): CallToolResult {
-  return {
-    content: [{ type: "text", text }],
-    isError: true,
   };
 }

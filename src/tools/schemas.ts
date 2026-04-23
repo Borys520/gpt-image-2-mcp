@@ -111,6 +111,83 @@ export const maskField = z
   );
 
 export const editQualityField = z
-  .enum(["auto", "low", "medium", "high", "standard"] as const)
+  .enum(QUALITY_LEVELS)
   .default("auto")
-  .describe("Edit quality. Same levels as generate, plus \"standard\" for backward-compatible callers.");
+  .describe("Edit quality — same levels as generate.");
+
+/* ------------------------------------------------------------------ */
+/* Output schemas — describe the shape of each tool's structuredContent. */
+/* ------------------------------------------------------------------ */
+
+const imageMetaSchema = z.object({
+  file_path: z.string(),
+  filename: z.string(),
+  size_bytes: z.number(),
+  mime_type: z.string(),
+});
+
+const usageSchema = z
+  .object({
+    input_tokens: z.number(),
+    output_tokens: z.number(),
+    total_tokens: z.number(),
+    input_tokens_details: z
+      .object({
+        text_tokens: z.number().optional(),
+        image_tokens: z.number().optional(),
+      })
+      .partial()
+      .optional(),
+    output_tokens_details: z
+      .object({
+        image_tokens: z.number().optional(),
+        text_tokens: z.number().optional(),
+      })
+      .partial()
+      .optional(),
+  })
+  .nullable();
+
+export const imageResultOutput = {
+  model: z.string(),
+  prompt: z.string(),
+  requested: z.object({
+    size: z.string(),
+    quality: z.string(),
+    n: z.number(),
+    format: z.string(),
+  }),
+  applied: z.object({
+    size: z.string().nullable().optional(),
+    quality: z.string().nullable().optional(),
+    background: z.string().nullable().optional(),
+    output_format: z.string(),
+  }),
+  images: z.array(imageMetaSchema),
+  usage: usageSchema,
+  cost_usd_estimated: z.number().nullable(),
+};
+
+export const sessionImageResultOutput = {
+  ...imageResultOutput,
+  session_id: z.string(),
+  turn: z.number(),
+};
+
+export const endSessionOutput = {
+  ended: z.boolean(),
+  session_id: z.string(),
+};
+
+export const listSessionsOutput = {
+  sessions: z.array(
+    z.object({
+      session_id: z.string(),
+      created_at: z.string(),
+      updated_at: z.string(),
+      turns: z.number(),
+      last_prompt: z.string(),
+      last_image_path: z.string(),
+    }),
+  ),
+};

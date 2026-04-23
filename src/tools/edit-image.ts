@@ -2,12 +2,17 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { type OutputFormat } from "../constants.js";
 import { describeOpenAIError, getClient } from "../openai-client.js";
-import { editViaResponses } from "../utils/edit-via-responses.js";
+import {
+  editViaDirectEndpoint,
+  editViaResponses,
+  usingDirectEdits,
+} from "../utils/edit-via-responses.js";
 import { loadImage, loadMask, validateEditImageCount } from "../utils/file-input.js";
 import { log } from "../utils/logger.js";
 import { resolveOutputDir } from "../utils/output-dir.js";
 import { buildImageResult } from "../utils/result-builder.js";
 import { validateSize } from "../utils/size-validator.js";
+import { toolError } from "./tool-error.js";
 
 type EditSize = "1024x1024" | "1024x1536" | "1536x1024" | "auto";
 type EditQuality = "low" | "medium" | "high" | "auto";
@@ -15,6 +20,7 @@ import {
   backgroundField,
   editQualityField,
   filenamePrefixField,
+  imageResultOutput,
   imagesArrayField,
   maskField,
   nField,
@@ -54,6 +60,7 @@ export function registerEditImage(server: McpServer): void {
         "gpt-image-2 always processes inputs at high fidelity (no input_fidelity knob needed). " +
         "The edited image is saved to disk and returned inline.",
       inputSchema,
+      outputSchema: imageResultOutput,
       annotations: {
         title: "Edit Image",
         readOnlyHint: false,
@@ -72,11 +79,13 @@ export function registerEditImage(server: McpServer): void {
         const outputFormat = (args.output_format ?? "png") as OutputFormat;
         const quality = args.quality ?? "auto";
         const background = args.background ?? "auto";
-        const n = args.n ?? 1;
+        const requestedN = args.n ?? 1;
+        const useDirect = usingDirectEdits();
+        const effectiveN = useDirect ? requestedN : 1;
 
-        if (n > 1) {
+        if (!useDirect && requestedN > 1) {
           log.warn(
-            `edit_image: requested n=${n}, but routed via Responses API which returns 1 image per call. Clamping to n=1. (We'll restore n>1 once OpenAI fixes /v1/images/edits for gpt-image-2.)`,
+            `edit_image: requested n=${requestedN}, but routed via Responses API which returns 1 image per call. Clamping to n=1. Set OPENAI_USE_DIRECT_EDITS=1 once OpenAI fixes /v1/images/edits to restore n>1.`,
           );
         }
 
@@ -87,15 +96,15 @@ export function registerEditImage(server: McpServer): void {
           size: sizeCheck.canonical,
           quality,
           background,
-          n: 1,
-          route: "responses",
+          n: effectiveN,
+          route: useDirect ? "direct" : "responses",
         });
 
         const uploadables = await Promise.all(args.images.map((s) => loadImage(s)));
         const mask = args.mask ? await loadMask(args.mask) : undefined;
 
         const client = getClient();
-        const res = await editViaResponses(client, {
+        const editParams = {
           prompt: args.prompt,
           images: uploadables,
           mask,
@@ -105,7 +114,10 @@ export function registerEditImage(server: McpServer): void {
           output_format: args.output_format,
           output_compression: args.output_compression,
           user: args.user,
-        });
+        };
+        const res = useDirect
+          ? await editViaDirectEndpoint(client, { ...editParams, n: requestedN })
+          : await editViaResponses(client, editParams);
 
         const built = buildImageResult({
           response: res,
@@ -114,10 +126,14 @@ export function registerEditImage(server: McpServer): void {
           filenameExtra: args.filename_prefix,
           requestedSize: sizeCheck.canonical,
           requestedQuality: String(quality),
-          requestedN: 1,
+          requestedN: effectiveN,
           requestedFormat: outputFormat,
           prompt: args.prompt,
-          label: "Edited 1 image (via Responses API)",
+          label: useDirect
+            ? effectiveN === 1
+              ? "Edited 1 image (direct endpoint)"
+              : `Edited → ${effectiveN} variants (direct endpoint)`
+            : "Edited 1 image (via Responses API)",
         });
         return built.result;
       } catch (err) {
@@ -127,11 +143,4 @@ export function registerEditImage(server: McpServer): void {
       }
     },
   );
-}
-
-function toolError(text: string): CallToolResult {
-  return {
-    content: [{ type: "text", text }],
-    isError: true,
-  };
 }

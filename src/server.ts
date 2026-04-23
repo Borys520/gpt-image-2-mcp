@@ -1,11 +1,29 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerGenerateImage } from "./tools/generate-image.js";
 import { registerEditImage } from "./tools/edit-image.js";
 import { registerSessionTools } from "./tools/session-tools.js";
 import { getDefaultOutputDir } from "./utils/output-dir.js";
 
-const PKG_NAME = "gpt-image-2-mcp";
-const PKG_VERSION = "0.1.0";
+function readPackageMetadata(): { name: string; version: string } {
+  // package.json lives at the repo/package root regardless of whether this
+  // file runs from `src/` (tsx) or `build/` (compiled) — npm always includes
+  // package.json in the published tarball.
+  try {
+    const pkgUrl = new URL("../package.json", import.meta.url);
+    const raw = readFileSync(fileURLToPath(pkgUrl), "utf8");
+    const pkg = JSON.parse(raw) as { name?: string; version?: string };
+    return {
+      name: pkg.name ?? "gpt-image-2-mcp",
+      version: pkg.version ?? "0.0.0",
+    };
+  } catch {
+    return { name: "gpt-image-2-mcp", version: "0.0.0" };
+  }
+}
+
+const { name: PKG_NAME, version: PKG_VERSION } = readPackageMetadata();
 
 export function createServer(): McpServer {
   const server = new McpServer(
