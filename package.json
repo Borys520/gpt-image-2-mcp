@@ -1,6 +1,6 @@
 {
   "name": "gpt-image-2-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "MCP server exposing OpenAI's gpt-image-2 for image generation and iterative editing.",
   "license": "MIT",
   "type": "module",
