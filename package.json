@@ -20,7 +20,7 @@
     "start": "node build/index.js",
     "inspect": "npx -y @modelcontextprotocol/inspector node build/index.js",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test 'tests/*.test.ts'",
+    "test": "node --import tsx --test tests/cost.test.ts tests/filename.test.ts tests/path-guard.test.ts tests/size-validator.test.ts",
     "prepublishOnly": "pnpm run typecheck && pnpm run test && pnpm run build"
   },
   "keywords": [
