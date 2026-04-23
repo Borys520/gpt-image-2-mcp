@@ -230,7 +230,7 @@ function registerContinue(server: McpServer): void {
         });
 
         const saved = built.saved[0]!;
-        updateSession(session.id, {
+        const updatedSession = updateSession(session.id, {
           prompt: args.prompt,
           base64: saved.base64,
           mime: saved.mimeType,
@@ -238,7 +238,7 @@ function registerContinue(server: McpServer): void {
           outputFormat,
         });
 
-        return addSessionIdToResult(built.result, session.id, session.turnCount);
+        return addSessionIdToResult(built.result, updatedSession.id, updatedSession.turnCount);
       } catch (err) {
         const msg = describeOpenAIError(err);
         log.error("continue_edit_session failed", msg);

@@ -7,6 +7,8 @@ import {
   MAX_MASK_BYTES,
 } from "../constants.js";
 
+const HTTP_FETCH_TIMEOUT_MS = 15_000;
+
 /**
  * Accept any of:
  *   - absolute or relative filesystem path
@@ -32,19 +34,7 @@ export async function loadImage(
   }
 
   if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-    const res = await fetch(trimmed);
-    if (!res.ok) {
-      throw new Error(`Failed to fetch image from ${trimmed}: HTTP ${res.status} ${res.statusText}`);
-    }
-    const contentType = res.headers.get("content-type") ?? "image/png";
-    const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.length > maxBytes) {
-      throw new Error(
-        `Remote image at ${trimmed} is ${humanBytes(buf.length)}, exceeds ${humanBytes(maxBytes)} limit.`,
-      );
-    }
-    const filename = filenameFromUrl(trimmed, contentType);
-    return toFile(buf, filename, { type: contentType });
+    return fetchImageCapped(trimmed, maxBytes);
   }
 
   const absPath = trimmed.startsWith("file://")
@@ -63,6 +53,62 @@ export async function loadImage(
     );
   }
   return fs.createReadStream(absPath);
+}
+
+/**
+ * Fetch a remote image with three safety checks:
+ *   1. Hard timeout (so a slow-drip server can't tie us up)
+ *   2. Early bail on Content-Length when the server declares oversized payload
+ *   3. Streaming read that aborts the moment the running byte count exceeds
+ *      maxBytes — a lying or absent Content-Length cannot OOM us
+ */
+async function fetchImageCapped(url: string, maxBytes: number): Promise<Uploadable> {
+  let res: Response;
+  try {
+    res = await fetch(url, { signal: AbortSignal.timeout(HTTP_FETCH_TIMEOUT_MS) });
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    throw new Error(`Failed to fetch image from ${url}: ${reason}`);
+  }
+  if (!res.ok) {
+    throw new Error(`Failed to fetch image from ${url}: HTTP ${res.status} ${res.statusText}`);
+  }
+  const contentType = res.headers.get("content-type") ?? "image/png";
+  const declared = res.headers.get("content-length");
+  if (declared) {
+    const size = Number(declared);
+    if (Number.isFinite(size) && size > maxBytes) {
+      throw new Error(
+        `Remote image at ${url} declares ${humanBytes(size)}, exceeds ${humanBytes(maxBytes)} limit.`,
+      );
+    }
+  }
+  if (!res.body) {
+    throw new Error(`Remote image fetch returned no body: ${url}`);
+  }
+  const reader = res.body.getReader();
+  const chunks: Buffer[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        throw new Error(
+          `Remote image at ${url} exceeded ${humanBytes(maxBytes)} during streaming (read ${humanBytes(total)}).`,
+        );
+      }
+      chunks.push(Buffer.from(value));
+    }
+  } finally {
+    reader.cancel().catch(() => {
+      /* best-effort cleanup */
+    });
+  }
+  const buf = Buffer.concat(chunks);
+  const filename = filenameFromUrl(url, contentType);
+  return toFile(buf, filename, { type: contentType });
 }
 
 export async function loadMask(spec: string): Promise<Uploadable> {
